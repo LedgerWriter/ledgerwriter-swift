@@ -369,11 +369,6 @@ components:
       type: string
       enum: [asset, liability, equity, revenue, expense]
 
-    BankAccountType:
-      type: string
-      enum:
-        [checking, savings, money_market, payroll, merchant, line_of_credit, petty_cash, other]
-
     LedgerAccount:
       type: object
       additionalProperties: false
@@ -390,9 +385,9 @@ components:
         isCashAccount:
           type: boolean
         bankAccountType:
-          oneOf:
-            - $ref: '#/components/schemas/BankAccountType'
-            - type: 'null'
+          description: The bank account type for cash accounts; null otherwise.
+          type: [string, 'null']
+          enum: [checking, savings, money_market, payroll, merchant, line_of_credit, petty_cash, other, null]
         status:
           type: string
           enum: [open, closed]
@@ -533,10 +528,11 @@ components:
         isCashAccount:
           type: boolean
         bankAccountType:
-          description: Required when `isCashAccount` is true; must be null otherwise.
-          oneOf:
-            - $ref: '#/components/schemas/BankAccountType'
-            - type: 'null'
+          description: |
+            The bank account type. Required when `isCashAccount` is true; must be null or
+            omitted otherwise.
+          type: [string, 'null']
+          enum: [checking, savings, money_market, payroll, merchant, line_of_credit, petty_cash, other, null]
 
     RenameLedgerAccountCommand:
       type: object
