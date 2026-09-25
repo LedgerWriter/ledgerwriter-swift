@@ -68,7 +68,7 @@ final class LedgerWriterTests: XCTestCase {
     func testDecodesJournalEntriesAndTrialBalance() async throws {
         let entries = try await LedgerWriter(
             token: "t",
-            transport: .json(
+            transport: MockTransport.json(
                 .ok,
                 """
                 [{"tenantId":"t1","entryId":"e1","date":"2026-09-01","memo":"Sale","totalAmount":125.5,
@@ -81,7 +81,7 @@ final class LedgerWriterTests: XCTestCase {
 
         let report = try await LedgerWriter(
             token: "t",
-            transport: .json(
+            transport: MockTransport.json(
                 .ok,
                 """
                 {"rows":[{"accountId":"a1","name":"Cash","accountType":"asset","debit":125.5,"credit":0}],
@@ -112,7 +112,7 @@ final class LedgerWriterTests: XCTestCase {
     func testErrorBodyBecomesLedgerWriterError() async throws {
         let ledgerWriter = LedgerWriter(
             token: "t",
-            transport: .json(
+            transport: MockTransport.json(
                 .conflict,
                 #"{"error":"CONCURRENCY_CONFLICT","message":"This journal entry was just changed by another request. Please try again."}"#,
                 requestId: "req-409"
@@ -137,7 +137,7 @@ final class LedgerWriterTests: XCTestCase {
     func testUnauthenticatedQueryThrowsStableCode() async throws {
         let ledgerWriter = LedgerWriter(
             token: "bad",
-            transport: .json(.unauthorized, #"{"error":"INVALID_TOKEN"}"#)
+            transport: MockTransport.json(.unauthorized, #"{"error":"INVALID_TOKEN"}"#)
         )
         do {
             _ = try await ledgerWriter.accountBalances()

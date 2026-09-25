@@ -2,12 +2,12 @@
 
 The Swift SDK and `lw` command-line tool for the LedgerWriter API.
 
-The client is **generated at build time** from `Sources/LedgerWriterAPI/openapi.yaml`, a
-vendored, byte-identical copy of the contract in
-[`mnhpub/ledger-writer`](https://github.com/mnhpub/ledger-writer) (`apps/api-external/openapi.yaml`).
-That file is the single source of truth, enforced there by a contract test; this repository
-never edits it. See ADR-14 in ledger-writer for the reasoning. `SPEC_SOURCE` records which
-commit the vendored copy came from.
+The client is **generated at build time** from
+[`Sources/LedgerWriterAPI/openapi.yaml`](Sources/LedgerWriterAPI/openapi.yaml), the published
+OpenAPI 3.1 contract for the LedgerWriter external API. It is a byte-identical copy of the
+contract maintained in LedgerWriter's (private) service repository, where a contract test
+keeps the running API and the spec in agreement; this repository never edits it.
+`SPEC_SOURCE` records which commit the copy came from.
 
 | Product | Platforms | What it is |
 | --- | --- | --- |
