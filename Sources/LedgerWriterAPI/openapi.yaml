@@ -1,0 +1,678 @@
+openapi: 3.1.0
+info:
+  title: LedgerWriter External API
+  version: 0.7.4
+  summary: Token-authenticated command and query API for a LedgerWriter tenant's ledger.
+  license:
+    name: Proprietary
+    url: https://ledgerwriter.com/terms
+  description: |
+    The single source of truth for the external API contract (see docs/adr/adr-14.md). SDKs,
+    including the Swift SDK, are generated from this file; `test/openapi-contract.test.ts`
+    checks that the Worker still serves exactly what it describes.
+
+    **Commands** go through one endpoint, `POST /commands`, as `{ type, payload }`. **Queries**
+    are plain REST reads. Every response carries an `X-Request-Id` header. The same id is
+    stored on every event the request produces, so quote it when asking about a specific
+    change in the audit trail.
+
+    **Amounts.** Amounts are currently JSON numbers in the tenant's currency (USD). The
+    upcoming money-model change moves every amount to the `Money` schema below (an exact
+    decimal string plus an ISO 4217 currency code). This spec and the server will change
+    together, so a client generated from this file never disagrees with the server.
+
+    **Errors** follow docs/adr/adr-12.md: `{ error: STABLE_CODE, message?: SAFE_TEXT }`.
+    `message` is always written for display; branch on `error`, never on `message`.
+servers:
+  - url: https://api.ledgerwriter.com
+security:
+  - apiToken: []
+
+paths:
+  /commands:
+    post:
+      operationId: issueCommand
+      summary: Issue a ledger command
+      description: |
+        Dispatches one command against the token's tenant. The acting identity recorded in
+        the audit trail is always the API token itself. Client-supplied actor fields
+        (`postedBy`, `openedBy`, ...) are ignored.
+
+        Authorization is per command type and token role: clerks may only
+        `OpenLedgerAccount` and `PostJournalEntry`; owners and bookkeepers may issue every
+        command; viewers may issue none.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommandRequest'
+      responses:
+        '200':
+          description: |
+            Command applied to an existing aggregate (`RenameLedgerAccount`,
+            `CloseLedgerAccount`, `ApproveJournalEntry`, `RejectJournalEntry`,
+            `ReverseJournalEntry`).
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AccountIdResult'
+                  - $ref: '#/components/schemas/EntryStatusResult'
+                  - $ref: '#/components/schemas/EntryIdResult'
+        '201':
+          description: |
+            New aggregate created (`OpenLedgerAccount`, `PostJournalEntry`). A replayed
+            `Idempotency-Key` returns the original result with the same status.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AccountIdResult'
+                  - $ref: '#/components/schemas/EntryPostedResult'
+        '400':
+          $ref: '#/components/responses/CommandBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CommandForbidden'
+        '404':
+          $ref: '#/components/responses/CommandNotFound'
+        '409':
+          $ref: '#/components/responses/CommandConflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /ledger-accounts:
+    get:
+      operationId: listLedgerAccounts
+      summary: List the tenant's ledger accounts
+      responses:
+        '200':
+          description: Every ledger account, open or closed.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LedgerAccount'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/QueryForbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /journal-entries:
+    get:
+      operationId: listJournalEntries
+      summary: List the tenant's posted journal entries
+      description: |
+        Newest first by entry date, then creation time. Entries still pending dual approval
+        are not listed until approved.
+      responses:
+        '200':
+          description: Posted journal entries.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/JournalEntrySummary'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/QueryForbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /account-balances:
+    get:
+      operationId: listAccountBalances
+      summary: List current balances for accounts with posted activity
+      responses:
+        '200':
+          description: One row per account that has at least one posted line.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountBalance'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/QueryForbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /reports/trial-balance:
+    get:
+      operationId: getTrialBalance
+      summary: Trial balance report
+      responses:
+        '200':
+          description: The tenant's trial balance as of now.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrialBalance'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/QueryForbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    apiToken:
+      type: http
+      scheme: bearer
+      description: |
+        An API token issued from the tenant's settings page. The token carries the tenant and
+        a role (`owner`, `bookkeeper`, `clerk`, or `viewer`).
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Client-chosen key. Retrying a command with the same key returns the original result
+        instead of applying it twice. This header is the only way to pass a key; an
+        `idempotencyKey` field inside `payload` is ignored.
+      schema:
+        type: string
+        minLength: 1
+
+  headers:
+    X-Request-Id:
+      description: |
+        Minted by the server for every request (never client-supplied) and stored on every
+        event the request produces.
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Unauthenticated:
+      description: |
+        `UNAUTHENTICATED` when the `Authorization: Bearer` header is missing or malformed;
+        `INVALID_TOKEN` when the token is unknown or revoked.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/X-Request-Id'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Error'
+              - properties:
+                  error:
+                    enum: [UNAUTHENTICATED, INVALID_TOKEN]
+    QueryForbidden:
+      description: The token's role may not read this projection (`FORBIDDEN`).
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/X-Request-Id'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Error'
+              - properties:
+                  error:
+                    const: FORBIDDEN
+    CommandBadRequest:
+      description: The command type is unknown, or the domain rejected the command's input.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/X-Request-Id'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Error'
+              - properties:
+                  error:
+                    enum:
+                      - UNKNOWN_COMMAND
+                      - INVALID_NAME
+                      - INVALID_ACCOUNT_TYPE
+                      - INVALID_BANK_ACCOUNT_TYPE
+                      - NAME_UNCHANGED
+                      - TOO_FEW_LINES
+                      - INVALID_LINE_AMOUNTS
+                      - UNBALANCED_ENTRY
+                      - UNKNOWN_ACCOUNT
+                      - INVALID_DATE
+                      - INVALID_MEMO
+    CommandForbidden:
+      description: |
+        `FORBIDDEN` when the token's role may not issue this command type;
+        `SELF_APPROVAL_NOT_ALLOWED` when the identity that posted a pending entry tries to
+        approve or reject it while the tenant has more than one active member. A tenant with
+        a single member can resolve its own entries; the event records it as self-approved.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/X-Request-Id'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Error'
+              - properties:
+                  error:
+                    enum: [FORBIDDEN, SELF_APPROVAL_NOT_ALLOWED]
+    CommandNotFound:
+      description: The target account or entry does not exist in this tenant.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/X-Request-Id'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Error'
+              - properties:
+                  error:
+                    enum: [ACCOUNT_NOT_FOUND, ENTRY_NOT_FOUND]
+    CommandConflict:
+      description: |
+        The command conflicts with the aggregate's current state. `CONCURRENCY_CONFLICT` is an
+        expected, retryable race: re-read and retry.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/X-Request-Id'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Error'
+              - properties:
+                  error:
+                    enum:
+                      - CONCURRENCY_CONFLICT
+                      - ACCOUNT_ALREADY_OPEN
+                      - ACCOUNT_ALREADY_CLOSED
+                      - ENTRY_ALREADY_POSTED
+                      - ENTRY_ALREADY_REVERSED
+                      - ENTRY_NOT_PENDING
+    InternalError:
+      description: |
+        Any unexpected failure, including a malformed JSON body. The message is fixed and
+        never contains internal details (ADR-12).
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/X-Request-Id'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Error'
+              - properties:
+                  error:
+                    const: INTERNAL_ERROR
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Stable, machine-readable code. Branch on this.
+        message:
+          type: string
+          description: Human-readable, safe to display. Never raw exception content.
+
+    Money:
+      description: |
+        **Target shape, not yet on the wire.** Planned replacement for every numeric amount
+        in this API, introduced by the money-model change: an exact decimal string (never a
+        JSON number) plus an ISO 4217 currency code.
+      type: object
+      additionalProperties: false
+      required: [amount, currency]
+      properties:
+        amount:
+          type: string
+          pattern: '^-?(0|[1-9][0-9]*)(\.[0-9]+)?$'
+          examples: ['1234.56']
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          examples: [USD]
+
+    AccountType:
+      type: string
+      enum: [asset, liability, equity, revenue, expense]
+
+    BankAccountType:
+      type: string
+      enum:
+        [checking, savings, money_market, payroll, merchant, line_of_credit, petty_cash, other]
+
+    LedgerAccount:
+      type: object
+      additionalProperties: false
+      required: [tenantId, accountId, name, accountType, isCashAccount, status, updatedAt]
+      properties:
+        tenantId:
+          type: string
+        accountId:
+          type: string
+        name:
+          type: string
+        accountType:
+          $ref: '#/components/schemas/AccountType'
+        isCashAccount:
+          type: boolean
+        bankAccountType:
+          oneOf:
+            - $ref: '#/components/schemas/BankAccountType'
+            - type: 'null'
+        status:
+          type: string
+          enum: [open, closed]
+        updatedAt:
+          type: string
+          format: date-time
+
+    JournalEntrySummary:
+      type: object
+      additionalProperties: false
+      required: [tenantId, entryId, date, memo, totalAmount, createdAt, reversedAt]
+      properties:
+        tenantId:
+          type: string
+        entryId:
+          type: string
+        date:
+          type: string
+          description: Entry date as supplied when posted (expected `YYYY-MM-DD`).
+        memo:
+          type: string
+        totalAmount:
+          type: number
+          description: Sum of the entry's debits. Becomes `Money` in the money-model change.
+        createdAt:
+          type: string
+          format: date-time
+        reversedAt:
+          type: [string, 'null']
+          format: date-time
+
+    AccountBalance:
+      type: object
+      additionalProperties: false
+      required: [tenantId, accountId, balance, updatedAt]
+      properties:
+        tenantId:
+          type: string
+        accountId:
+          type: string
+        balance:
+          type: number
+          description: |
+            Signed net balance, debits minus credits. Becomes `Money` in the money-model
+            change.
+        updatedAt:
+          type: string
+          format: date-time
+
+    TrialBalanceRow:
+      type: object
+      additionalProperties: false
+      required: [accountId, name, accountType, debit, credit]
+      properties:
+        accountId:
+          type: string
+        name:
+          type: string
+        accountType:
+          $ref: '#/components/schemas/AccountType'
+        debit:
+          type: number
+          minimum: 0
+        credit:
+          type: number
+          minimum: 0
+
+    TrialBalance:
+      type: object
+      additionalProperties: false
+      required: [rows, totalDebit, totalCredit, balanced]
+      properties:
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrialBalanceRow'
+        totalDebit:
+          type: number
+        totalCredit:
+          type: number
+        balanced:
+          type: boolean
+          description: Should always be true; exists to surface corruption, not as decoration.
+
+    JournalEntryLine:
+      type: object
+      additionalProperties: false
+      required: [accountId, debit, credit]
+      description: Exactly one of `debit` or `credit` must be greater than zero.
+      properties:
+        accountId:
+          type: string
+        debit:
+          type: number
+          minimum: 0
+        credit:
+          type: number
+          minimum: 0
+
+    CommandRequest:
+      oneOf:
+        - $ref: '#/components/schemas/OpenLedgerAccountCommand'
+        - $ref: '#/components/schemas/RenameLedgerAccountCommand'
+        - $ref: '#/components/schemas/CloseLedgerAccountCommand'
+        - $ref: '#/components/schemas/PostJournalEntryCommand'
+        - $ref: '#/components/schemas/ReverseJournalEntryCommand'
+        - $ref: '#/components/schemas/ApproveJournalEntryCommand'
+        - $ref: '#/components/schemas/RejectJournalEntryCommand'
+      discriminator:
+        propertyName: type
+        mapping:
+          OpenLedgerAccount: '#/components/schemas/OpenLedgerAccountCommand'
+          RenameLedgerAccount: '#/components/schemas/RenameLedgerAccountCommand'
+          CloseLedgerAccount: '#/components/schemas/CloseLedgerAccountCommand'
+          PostJournalEntry: '#/components/schemas/PostJournalEntryCommand'
+          ReverseJournalEntry: '#/components/schemas/ReverseJournalEntryCommand'
+          ApproveJournalEntry: '#/components/schemas/ApproveJournalEntryCommand'
+          RejectJournalEntry: '#/components/schemas/RejectJournalEntryCommand'
+
+    OpenLedgerAccountCommand:
+      type: object
+      required: [type, payload]
+      properties:
+        type:
+          type: string
+          const: OpenLedgerAccount
+        payload:
+          $ref: '#/components/schemas/OpenLedgerAccountPayload'
+
+    OpenLedgerAccountPayload:
+      type: object
+      required: [name, accountType, isCashAccount]
+      properties:
+        name:
+          type: string
+        accountType:
+          $ref: '#/components/schemas/AccountType'
+        isCashAccount:
+          type: boolean
+        bankAccountType:
+          description: Required when `isCashAccount` is true; must be null otherwise.
+          oneOf:
+            - $ref: '#/components/schemas/BankAccountType'
+            - type: 'null'
+
+    RenameLedgerAccountCommand:
+      type: object
+      required: [type, payload]
+      properties:
+        type:
+          type: string
+          const: RenameLedgerAccount
+        payload:
+          $ref: '#/components/schemas/RenameLedgerAccountPayload'
+
+    RenameLedgerAccountPayload:
+      type: object
+      required: [accountId, newName]
+      properties:
+        accountId:
+          type: string
+        newName:
+          type: string
+
+    CloseLedgerAccountCommand:
+      type: object
+      required: [type, payload]
+      properties:
+        type:
+          type: string
+          const: CloseLedgerAccount
+        payload:
+          $ref: '#/components/schemas/AccountRef'
+
+    PostJournalEntryCommand:
+      type: object
+      required: [type, payload]
+      description: |
+        Entries whose total debit is at or above the tenant's dual-approval threshold are
+        created as `pending` and need `ApproveJournalEntry` from a different identity.
+      properties:
+        type:
+          type: string
+          const: PostJournalEntry
+        payload:
+          $ref: '#/components/schemas/PostJournalEntryPayload'
+
+    PostJournalEntryPayload:
+      type: object
+      required: [date, memo, lines]
+      properties:
+        date:
+          type: string
+          description: Entry date, `YYYY-MM-DD`.
+        memo:
+          type: string
+        lines:
+          type: array
+          minItems: 2
+          items:
+            $ref: '#/components/schemas/JournalEntryLine'
+
+    ReverseJournalEntryCommand:
+      type: object
+      required: [type, payload]
+      properties:
+        type:
+          type: string
+          const: ReverseJournalEntry
+        payload:
+          $ref: '#/components/schemas/EntryRef'
+
+    ApproveJournalEntryCommand:
+      type: object
+      required: [type, payload]
+      properties:
+        type:
+          type: string
+          const: ApproveJournalEntry
+        payload:
+          $ref: '#/components/schemas/EntryRef'
+
+    RejectJournalEntryCommand:
+      type: object
+      required: [type, payload]
+      properties:
+        type:
+          type: string
+          const: RejectJournalEntry
+        payload:
+          $ref: '#/components/schemas/EntryRef'
+
+    AccountRef:
+      type: object
+      required: [accountId]
+      properties:
+        accountId:
+          type: string
+
+    EntryRef:
+      type: object
+      required: [entryId]
+      properties:
+        entryId:
+          type: string
+
+    AccountIdResult:
+      type: object
+      additionalProperties: false
+      required: [accountId]
+      properties:
+        accountId:
+          type: string
+
+    EntryPostedResult:
+      type: object
+      additionalProperties: false
+      required: [entryId, status]
+      properties:
+        entryId:
+          type: string
+        status:
+          type: string
+          enum: [posted, pending]
+
+    EntryStatusResult:
+      type: object
+      additionalProperties: false
+      required: [entryId, status]
+      properties:
+        entryId:
+          type: string
+        status:
+          type: string
+          enum: [posted, rejected]
+
+    EntryIdResult:
+      type: object
+      additionalProperties: false
+      required: [entryId]
+      properties:
+        entryId:
+          type: string

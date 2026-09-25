@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  linux:
+    name: Linux (swift build + test)
+    runs-on: ubuntu-latest
+    container: swift:6.1
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift build
+      - run: swift test
+
+  macos:
+    name: macOS + iOS Simulator
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - run: swift build
+      - run: swift test
+      - name: Build LedgerWriterAPI for iOS Simulator
+        run: >
+          xcodebuild build
+          -scheme LedgerWriterAPI
+          -destination 'generic/platform=iOS Simulator'
+          -skipPackagePluginValidation
