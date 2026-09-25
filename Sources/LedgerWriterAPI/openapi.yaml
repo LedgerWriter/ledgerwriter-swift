@@ -16,10 +16,12 @@ info:
     stored on every event the request produces, so quote it when asking about a specific
     change in the audit trail.
 
-    **Amounts.** Amounts are currently JSON numbers in the tenant's currency (USD). The
-    upcoming money-model change moves every amount to the `Money` schema below (an exact
-    decimal string plus an ISO 4217 currency code). This spec and the server will change
-    together, so a client generated from this file never disagrees with the server.
+    **Amounts.** Every amount, in requests and responses, is a `Money` object: an exact
+    decimal string plus an ISO 4217 currency code, e.g. `{ "amount": "125.50", "currency":
+    "USD" }`. Amounts are never JSON numbers, so no client or server ever rounds them through
+    a binary float. Responses always use exactly two decimal places. Requests may use zero
+    to two (`"125"`, `"125.5"`, `"125.50"`); more than two is rejected rather than rounded.
+    USD is the only supported currency today.
 
     **Errors** follow docs/adr/adr-12.md: `{ error: STABLE_CODE, message?: SAFE_TEXT }`.
     `message` is always written for display; branch on `error`, never on `message`.
@@ -264,6 +266,7 @@ components:
                       - NAME_UNCHANGED
                       - TOO_FEW_LINES
                       - INVALID_LINE_AMOUNTS
+                      - UNSUPPORTED_CURRENCY
                       - UNBALANCED_ENTRY
                       - UNKNOWN_ACCOUNT
                       - INVALID_DATE
@@ -349,16 +352,16 @@ components:
 
     Money:
       description: |
-        **Target shape, not yet on the wire.** Planned replacement for every numeric amount
-        in this API, introduced by the money-model change: an exact decimal string (never a
-        JSON number) plus an ISO 4217 currency code.
+        An exact amount: a decimal string (never a JSON number) plus an ISO 4217 currency
+        code. At most two decimal places; negative only where a value can be negative
+        (balances, net figures), never on journal-entry lines.
       type: object
       additionalProperties: false
       required: [amount, currency]
       properties:
         amount:
           type: string
-          pattern: '^-?(0|[1-9][0-9]*)(\.[0-9]+)?$'
+          pattern: '^-?(0|[1-9][0-9]*)(\.[0-9]{1,2})?$'
           examples: ['1234.56']
         currency:
           type: string
@@ -410,8 +413,8 @@ components:
         memo:
           type: string
         totalAmount:
-          type: number
-          description: Sum of the entry's debits. Becomes `Money` in the money-model change.
+          description: Sum of the entry's debits.
+          $ref: '#/components/schemas/Money'
         createdAt:
           type: string
           format: date-time
@@ -429,10 +432,8 @@ components:
         accountId:
           type: string
         balance:
-          type: number
-          description: |
-            Signed net balance, debits minus credits. Becomes `Money` in the money-model
-            change.
+          description: Signed net balance, debits minus credits.
+          $ref: '#/components/schemas/Money'
         updatedAt:
           type: string
           format: date-time
@@ -449,11 +450,9 @@ components:
         accountType:
           $ref: '#/components/schemas/AccountType'
         debit:
-          type: number
-          minimum: 0
+          $ref: '#/components/schemas/Money'
         credit:
-          type: number
-          minimum: 0
+          $ref: '#/components/schemas/Money'
 
     TrialBalance:
       type: object
@@ -465,9 +464,9 @@ components:
           items:
             $ref: '#/components/schemas/TrialBalanceRow'
         totalDebit:
-          type: number
+          $ref: '#/components/schemas/Money'
         totalCredit:
-          type: number
+          $ref: '#/components/schemas/Money'
         balanced:
           type: boolean
           description: Should always be true; exists to surface corruption, not as decoration.
@@ -476,16 +475,16 @@ components:
       type: object
       additionalProperties: false
       required: [accountId, debit, credit]
-      description: Exactly one of `debit` or `credit` must be greater than zero.
+      description: |
+        Exactly one of `debit` or `credit` must be greater than zero; the other is zero (e.g.
+        `"0"`). Both non-negative, and every line of an entry in the same currency.
       properties:
         accountId:
           type: string
         debit:
-          type: number
-          minimum: 0
+          $ref: '#/components/schemas/Money'
         credit:
-          type: number
-          minimum: 0
+          $ref: '#/components/schemas/Money'
 
     CommandRequest:
       oneOf:

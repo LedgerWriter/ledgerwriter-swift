@@ -145,12 +145,17 @@ struct PostEntry: AsyncParsableCommand {
         )
     }
 
+    // Amounts stay strings end to end (never Double), matching the API's exact Money format.
     private func line(_ spec: String, debit: Bool) throws -> [String: Any] {
         let parts = spec.split(separator: "=", maxSplits: 1).map(String.init)
-        guard parts.count == 2, let amount = Double(parts[1]), amount > 0 else {
-            throw ValidationError("Expected ACCOUNT_ID=AMOUNT with a positive amount, got \(spec)")
+        guard parts.count == 2, let amount = Components.Schemas.Money.usd(parts[1]), amount.isPositive
+        else {
+            throw ValidationError(
+                "Expected ACCOUNT_ID=AMOUNT with a positive amount and at most two decimals, got \(spec)")
         }
-        return ["accountId": parts[0], "debit": debit ? amount : 0, "credit": debit ? 0 : amount]
+        let zero = ["amount": "0", "currency": amount.currency]
+        let value = ["amount": amount.amount, "currency": amount.currency]
+        return ["accountId": parts[0], "debit": debit ? value : zero, "credit": debit ? zero : value]
     }
 }
 
@@ -198,8 +203,8 @@ private func printTable(_ header: [String], _ rows: [[String]]) {
     }
 }
 
-private func formatAmount(_ value: Double) -> String {
-    String(format: "%.2f", value)
+private func formatAmount(_ money: Components.Schemas.Money) -> String {
+    money.amount
 }
 
 private func printError(_ message: String) {

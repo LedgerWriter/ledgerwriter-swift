@@ -71,12 +71,14 @@ final class LedgerWriterTests: XCTestCase {
             transport: MockTransport.json(
                 .ok,
                 """
-                [{"tenantId":"t1","entryId":"e1","date":"2026-09-01","memo":"Sale","totalAmount":125.5,
+                [{"tenantId":"t1","entryId":"e1","date":"2026-09-01","memo":"Sale",
+                  "totalAmount":{"amount":"125.50","currency":"USD"},
                   "createdAt":"2026-09-01T10:00:00.000Z","reversedAt":null}]
                 """
             )
         ).journalEntries()
-        XCTAssertEqual(entries.first?.totalAmount, 125.5)
+        XCTAssertEqual(entries.first?.totalAmount.amount, "125.50")
+        XCTAssertEqual(entries.first?.totalAmount.currency, "USD")
         XCTAssertNil(entries.first?.reversedAt)
 
         let report = try await LedgerWriter(
@@ -84,13 +86,17 @@ final class LedgerWriterTests: XCTestCase {
             transport: MockTransport.json(
                 .ok,
                 """
-                {"rows":[{"accountId":"a1","name":"Cash","accountType":"asset","debit":125.5,"credit":0}],
-                 "totalDebit":125.5,"totalCredit":125.5,"balanced":true}
+                {"rows":[{"accountId":"a1","name":"Cash","accountType":"asset",
+                          "debit":{"amount":"125.50","currency":"USD"},
+                          "credit":{"amount":"0.00","currency":"USD"}}],
+                 "totalDebit":{"amount":"125.50","currency":"USD"},
+                 "totalCredit":{"amount":"125.50","currency":"USD"},"balanced":true}
                 """
             )
         ).trialBalance()
         XCTAssertTrue(report.balanced)
         XCTAssertEqual(report.rows.count, 1)
+        XCTAssertEqual(report.totalDebit.decimalValue, Decimal(string: "125.50"))
     }
 
     func testIssueForwardsIdempotencyKeyAndReturnsCreated() async throws {
@@ -107,6 +113,39 @@ final class LedgerWriterTests: XCTestCase {
         let request = try XCTUnwrap(transport.requests.first)
         XCTAssertEqual(request.method, .post)
         XCTAssertEqual(request.headerFields[HTTPField.Name("Idempotency-Key")!], "key-123")
+    }
+
+    func testPostJournalEntrySendsMoneyAmounts() async throws {
+        let transport = MockTransport.json(.created, #"{"entryId":"e9","status":"posted"}"#)
+        let command = try Components.Schemas.CommandRequest.make(
+            type: "PostJournalEntry",
+            payload: [
+                "date": "2026-09-25",
+                "memo": "Invoice 1042",
+                "lines": [
+                    ["accountId": "cash", "debit": ["amount": "250.00", "currency": "USD"],
+                     "credit": ["amount": "0", "currency": "USD"]],
+                    ["accountId": "revenue", "debit": ["amount": "0", "currency": "USD"],
+                     "credit": ["amount": "250.00", "currency": "USD"]],
+                ],
+            ]
+        )
+        let output = try await LedgerWriter(token: "t", transport: transport).issue(command)
+        guard case .created = output else { return XCTFail("expected 201 Created, got \(output)") }
+    }
+
+    func testMoneyHelpersAreExact() throws {
+        XCTAssertEqual(Components.Schemas.Money.usd("125.5")?.amount, "125.5")
+        XCTAssertNil(Components.Schemas.Money.usd("10.005"))
+        XCTAssertNil(Components.Schemas.Money.usd("1,000.00"))
+        XCTAssertNil(Components.Schemas.Money.make("1.00", currency: "usd"))
+
+        let tenth = try XCTUnwrap(Components.Schemas.Money.usd("0.10")?.decimalValue)
+        let fifth = try XCTUnwrap(Components.Schemas.Money.usd("0.20")?.decimalValue)
+        XCTAssertEqual(tenth + fifth, Decimal(string: "0.30"))  // exact, unlike Double
+
+        XCTAssertTrue(try XCTUnwrap(Components.Schemas.Money.usd("-30.00")).isNegative)
+        XCTAssertFalse(try XCTUnwrap(Components.Schemas.Money.usd("0")).isPositive)
     }
 
     func testErrorBodyBecomesLedgerWriterError() async throws {

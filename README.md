@@ -21,7 +21,7 @@ Planned next, per ADR-14: `LedgerWriterAuth` (OAuth + PKCE, passkeys), `LedgerWr
 
 ```swift
 // Package.swift
-.package(url: "https://github.com/LedgerWriter/ledgerwriter-swift", branch: "main"),
+.package(url: "https://github.com/LedgerWriter/ledgerwriter-swift", from: "0.2.0"),
 // target dependency:
 .product(name: "LedgerWriterAPI", package: "ledgerwriter-swift"),
 ```
@@ -40,8 +40,10 @@ let command = try Components.Schemas.CommandRequest.make(
         "date": "2026-09-25",
         "memo": "Invoice 1042",
         "lines": [
-            ["accountId": cashId, "debit": 250.0, "credit": 0.0],
-            ["accountId": revenueId, "debit": 0.0, "credit": 250.0],
+            ["accountId": cashId, "debit": ["amount": "250.00", "currency": "USD"],
+             "credit": ["amount": "0", "currency": "USD"]],
+            ["accountId": revenueId, "debit": ["amount": "0", "currency": "USD"],
+             "credit": ["amount": "250.00", "currency": "USD"]],
         ],
     ]
 )
@@ -54,9 +56,11 @@ do {
 }
 ```
 
-Amounts are JSON numbers today. They move to exact decimal strings with a currency code in
-the upcoming money-model change, which updates the spec and server together; regenerate
-after syncing.
+Every amount is a `Money` value, an exact decimal string plus a currency code
+(`Components.Schemas.Money(amount: "125.50", currency: "USD")`), never a floating-point
+number. `Money.usd("125.50")` validates an amount, and `decimalValue` gives an exact
+`Foundation.Decimal` for arithmetic. Version 0.2.0 introduced this format; 0.1.0 used JSON
+numbers and doesn't work against the current API.
 
 ## Using `lw`
 
