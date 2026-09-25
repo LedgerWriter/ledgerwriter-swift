@@ -79,3 +79,8 @@ the request id.
 Scripts/sync-openapi.sh /path/to/ledger-writer <git-ref>
 swift build && swift test
 ```
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE).
+This license covers this SDK and CLI only; the LedgerWriter service itself is proprietary.
