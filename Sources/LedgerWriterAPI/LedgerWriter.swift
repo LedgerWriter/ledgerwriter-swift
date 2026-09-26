@@ -48,6 +48,21 @@ public struct LedgerWriter: Sendable {
         try Self.convert(try await unwrapped { try await client.listJournalEntries().ok.body.json })
     }
 
+    /// Entries awaiting dual approval, newest first, with the lines approval would book.
+    public func pendingJournalEntries() async throws -> [PendingJournalEntry] {
+        try Self.convert(try await unwrapped { try await client.listPendingJournalEntries().ok.body.json })
+    }
+
+    /// The rate an entry in `currency` dated `date` (`YYYY-MM-DD`) would book at if it didn't
+    /// state one: a rate the tenant entered, else the ECB reference rate, from up to a week
+    /// earlier. `rate` is nil when nothing is on file.
+    public func effectiveExchangeRate(currency: String, date: String) async throws -> EffectiveExchangeRate {
+        try Self.convert(
+            try await unwrapped {
+                try await client.getEffectiveExchangeRate(query: .init(currency: currency, date: date)).ok.body.json
+            })
+    }
+
     public func accountBalances() async throws -> [AccountBalance] {
         try Self.convert(try await unwrapped { try await client.listAccountBalances().ok.body.json })
     }

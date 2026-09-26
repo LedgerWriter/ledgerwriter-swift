@@ -122,7 +122,7 @@ paths:
       summary: List the tenant's posted journal entries
       description: |
         Newest first by entry date, then creation time. Entries still pending dual approval
-        are not listed until approved.
+        are not listed until approved; see `GET /journal-entries/pending`.
       responses:
         '200':
           description: Posted journal entries.
@@ -135,6 +135,86 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/JournalEntrySummary'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/QueryForbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /journal-entries/pending:
+    get:
+      operationId: listPendingJournalEntries
+      summary: List entries awaiting dual approval
+      description: |
+        Entries whose booked total reached the tenant's dual-approval threshold and that no
+        one has approved or rejected yet, newest first. `lines` is what approving the entry
+        would book.
+      responses:
+        '200':
+          description: Pending journal entries.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingJournalEntry'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/QueryForbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /exchange-rates/effective:
+    get:
+      operationId: getEffectiveExchangeRate
+      summary: The rate an entry would book at if it didn't state one
+      description: |
+        The rate on file for an entry in `currency` dated `date`: a rate the tenant entered,
+        otherwise the European Central Bank reference rate, from the most recent date within
+        the previous seven days. `rate` is absent when nothing is on file, in which case a
+        foreign-currency entry must supply its own `exchangeRate`.
+      parameters:
+        - name: currency
+          in: query
+          required: true
+          description: ISO 4217 code of the entry's currency.
+          schema:
+            type: string
+            pattern: '^[A-Z]{3}$'
+        - name: date
+          in: query
+          required: true
+          description: The entry date, `YYYY-MM-DD`.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The effective rate, or null.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EffectiveExchangeRate'
+        '400':
+          description: A query parameter is missing (`INVALID_INPUT`).
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Error'
+                  - properties:
+                      error:
+                        const: INVALID_INPUT
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -414,7 +494,18 @@ components:
       type: object
       additionalProperties: false
       required:
-        [tenantId, entryId, date, memo, totalAmount, transactionAmount, exchangeRate, createdAt, reversedAt]
+        [
+          tenantId,
+          entryId,
+          date,
+          memo,
+          totalAmount,
+          transactionAmount,
+          exchangeRate,
+          selfApproved,
+          createdAt,
+          reversedAt,
+        ]
       properties:
         tenantId:
           type: string
@@ -438,12 +529,97 @@ components:
             Functional-currency units per one unit of the entry's currency, exactly as booked.
             `"1"` for an entry in the functional currency.
           $ref: '#/components/schemas/ExchangeRate'
+        selfApproved:
+          description: |
+            True when the entry went through dual approval and was approved by the person
+            who posted it, which is allowed only for a tenant with a single active member.
+          type: boolean
         createdAt:
           type: string
           format: date-time
         reversedAt:
           type: [string, 'null']
           format: date-time
+
+    PendingJournalEntry:
+      type: object
+      additionalProperties: false
+      required:
+        [tenantId, entryId, date, memo, totalAmount, transactionAmount, exchangeRate, postedBy, lines]
+      properties:
+        tenantId:
+          type: string
+        entryId:
+          type: string
+        date:
+          type: string
+        memo:
+          type: string
+        totalAmount:
+          description: Sum of the debits as they would be booked, in the functional currency.
+          $ref: '#/components/schemas/Money'
+        transactionAmount:
+          description: Sum of the debits as entered, in the entry's own currency.
+          $ref: '#/components/schemas/Money'
+        exchangeRate:
+          $ref: '#/components/schemas/ExchangeRate'
+        postedBy:
+          description: The id of the user who posted the entry.
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/EntryLine'
+
+    EntryLine:
+      description: |
+        One line of an entry: `debit`/`credit` as booked in the functional currency, and
+        `transactionDebit`/`transactionCredit` as entered. They're equal for an entry in the
+        functional currency and for a realized FX gain/loss line.
+      type: object
+      additionalProperties: false
+      required: [accountId, debit, credit, transactionDebit, transactionCredit]
+      properties:
+        accountId:
+          type: string
+        debit:
+          $ref: '#/components/schemas/Money'
+        credit:
+          $ref: '#/components/schemas/Money'
+        transactionDebit:
+          $ref: '#/components/schemas/Money'
+        transactionCredit:
+          $ref: '#/components/schemas/Money'
+
+    StoredExchangeRate:
+      type: object
+      additionalProperties: false
+      required: [rate, source, rateDate]
+      properties:
+        rate:
+          $ref: '#/components/schemas/ExchangeRate'
+        source:
+          description: '`manual`: entered by the tenant; `ecb`: European Central Bank reference rate.'
+          type: string
+          enum: [manual, ecb]
+        rateDate:
+          description: The date the rate is quoted for, `YYYY-MM-DD`.
+          type: string
+
+    EffectiveExchangeRate:
+      type: object
+      additionalProperties: false
+      required: [currency, functionalCurrency, date]
+      properties:
+        currency:
+          type: string
+        functionalCurrency:
+          type: string
+        date:
+          type: string
+        rate:
+          description: Absent when no rate is on file for the date.
+          $ref: '#/components/schemas/StoredExchangeRate'
 
     AccountBalance:
       type: object

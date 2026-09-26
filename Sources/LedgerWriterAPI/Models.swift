@@ -89,6 +89,9 @@ public struct JournalEntry: Sendable, Hashable, Codable, Identifiable {
     public let transactionAmount: Money
     /// Functional-currency units per one unit of the entry's currency; `"1"` when they match.
     public let exchangeRate: String
+    /// Approved by the person who posted it, which is allowed only when the tenant has a single
+    /// active member.
+    public let selfApproved: Bool
     public let createdAt: Date
     public let reversedAt: Date?
 
@@ -104,6 +107,7 @@ public struct JournalEntry: Sendable, Hashable, Codable, Identifiable {
         totalAmount: Money,
         transactionAmount: Money,
         exchangeRate: String,
+        selfApproved: Bool,
         createdAt: Date,
         reversedAt: Date?
     ) {
@@ -114,6 +118,7 @@ public struct JournalEntry: Sendable, Hashable, Codable, Identifiable {
         self.totalAmount = totalAmount
         self.transactionAmount = transactionAmount
         self.exchangeRate = exchangeRate
+        self.selfApproved = selfApproved
         self.createdAt = createdAt
         self.reversedAt = reversedAt
     }
@@ -202,5 +207,106 @@ public struct PostedEntry: Sendable, Hashable, Codable {
     ) {
         self.entryId = entryId
         self.status = status
+    }
+}
+
+/// A journal entry awaiting dual approval: its booked total reached the tenant's threshold.
+public struct PendingJournalEntry: Sendable, Hashable, Codable, Identifiable {
+    public let tenantId: String
+    public let entryId: String
+    public let date: String
+    public let memo: String
+    /// Sum of the debits as they would be booked, in the functional currency.
+    public let totalAmount: Money
+    /// Sum of the debits as entered, in the entry's own currency.
+    public let transactionAmount: Money
+    public let exchangeRate: String
+    /// The id of the user who posted it.
+    public let postedBy: String
+    /// What approving the entry would book.
+    public let lines: [EntryLine]
+
+    public var id: String { entryId }
+    public var isForeignCurrency: Bool { transactionAmount.currency != totalAmount.currency }
+
+    public init(
+        tenantId: String,
+        entryId: String,
+        date: String,
+        memo: String,
+        totalAmount: Money,
+        transactionAmount: Money,
+        exchangeRate: String,
+        postedBy: String,
+        lines: [EntryLine]
+    ) {
+        self.tenantId = tenantId
+        self.entryId = entryId
+        self.date = date
+        self.memo = memo
+        self.totalAmount = totalAmount
+        self.transactionAmount = transactionAmount
+        self.exchangeRate = exchangeRate
+        self.postedBy = postedBy
+        self.lines = lines
+    }
+}
+
+/// One line of an entry: `debit`/`credit` as booked in the functional currency, and the
+/// `transaction` amounts as entered (equal for a functional-currency entry).
+public struct EntryLine: Sendable, Hashable, Codable {
+    public let accountId: String
+    public let debit: Money
+    public let credit: Money
+    public let transactionDebit: Money
+    public let transactionCredit: Money
+
+    public init(
+        accountId: String,
+        debit: Money,
+        credit: Money,
+        transactionDebit: Money,
+        transactionCredit: Money
+    ) {
+        self.accountId = accountId
+        self.debit = debit
+        self.credit = credit
+        self.transactionDebit = transactionDebit
+        self.transactionCredit = transactionCredit
+    }
+}
+
+/// A rate on file: entered by the tenant, or the European Central Bank reference rate.
+public struct StoredExchangeRate: Sendable, Hashable, Codable {
+    public enum Source: String, Sendable, Hashable, Codable {
+        case manual, ecb
+    }
+
+    /// Functional-currency units per one unit of the entry's currency, e.g. `"1.0845"`.
+    public let rate: String
+    public let source: Source
+    /// The date the rate is quoted for, `YYYY-MM-DD`.
+    public let rateDate: String
+
+    public init(rate: String, source: Source, rateDate: String) {
+        self.rate = rate
+        self.source = source
+        self.rateDate = rateDate
+    }
+}
+
+/// What a foreign-currency entry in `currency` dated `date` would book at if it didn't state a
+/// rate; `rate` is nil when nothing is on file, and the entry must then supply one.
+public struct EffectiveExchangeRate: Sendable, Hashable, Codable {
+    public let currency: String
+    public let functionalCurrency: String
+    public let date: String
+    public let rate: StoredExchangeRate?
+
+    public init(currency: String, functionalCurrency: String, date: String, rate: StoredExchangeRate?) {
+        self.currency = currency
+        self.functionalCurrency = functionalCurrency
+        self.date = date
+        self.rate = rate
     }
 }
