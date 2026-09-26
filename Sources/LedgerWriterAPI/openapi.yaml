@@ -267,6 +267,7 @@ components:
                       - TOO_FEW_LINES
                       - INVALID_LINE_AMOUNTS
                       - UNSUPPORTED_CURRENCY
+                      - INVALID_EXCHANGE_RATE
                       - UNBALANCED_ENTRY
                       - UNKNOWN_ACCOUNT
                       - INVALID_DATE
@@ -353,20 +354,30 @@ components:
     Money:
       description: |
         An exact amount: a decimal string (never a JSON number) plus an ISO 4217 currency
-        code. At most two decimal places; negative only where a value can be negative
-        (balances, net figures), never on journal-entry lines.
+        code. The number of decimal places is at most the currency's minor-unit exponent:
+        two for USD or EUR, none for JPY, three for BHD. Negative only where a value can be
+        negative (balances, net figures), never on journal-entry lines.
       type: object
       additionalProperties: false
       required: [amount, currency]
       properties:
         amount:
           type: string
-          pattern: '^-?(0|[1-9][0-9]*)(\.[0-9]{1,2})?$'
+          pattern: '^-?(0|[1-9][0-9]*)(\.[0-9]{1,3})?$'
           examples: ['1234.56']
         currency:
           type: string
           pattern: '^[A-Z]{3}$'
           examples: [USD]
+
+    ExchangeRate:
+      description: |
+        An exact, positive decimal rate as a string (never a JSON number), with at most 10
+        decimal places: units of the tenant's functional currency per one unit of another
+        currency, e.g. `"1.0845"` for EUR to USD.
+      type: string
+      pattern: '^(0|[1-9][0-9]*)(\.[0-9]{1,10})?$'
+      examples: ['1.0845']
 
     AccountType:
       type: string
@@ -401,7 +412,8 @@ components:
     JournalEntrySummary:
       type: object
       additionalProperties: false
-      required: [tenantId, entryId, date, memo, totalAmount, createdAt, reversedAt]
+      required:
+        [tenantId, entryId, date, memo, totalAmount, transactionAmount, exchangeRate, createdAt, reversedAt]
       properties:
         tenantId:
           type: string
@@ -413,8 +425,18 @@ components:
         memo:
           type: string
         totalAmount:
-          description: Sum of the entry's debits.
+          description: Sum of the entry's debits as booked, in the tenant's functional currency.
           $ref: '#/components/schemas/Money'
+        transactionAmount:
+          description: |
+            Sum of the entry's debits as entered, in the entry's own currency. Equal to
+            `totalAmount` for an entry in the functional currency.
+          $ref: '#/components/schemas/Money'
+        exchangeRate:
+          description: |
+            Functional-currency units per one unit of the entry's currency, exactly as booked.
+            `"1"` for an entry in the functional currency.
+          $ref: '#/components/schemas/ExchangeRate'
         createdAt:
           type: string
           format: date-time
@@ -589,6 +611,13 @@ components:
           minItems: 2
           items:
             $ref: '#/components/schemas/JournalEntryLine'
+        exchangeRate:
+          description: |
+            Required when the lines are in a currency other than the tenant's functional
+            currency; the entry is booked at this rate, rounded once per line to the
+            functional currency's minor unit. Omit it (or send `"1"`) for a functional-currency
+            entry.
+          $ref: '#/components/schemas/ExchangeRate'
 
     ReverseJournalEntryCommand:
       type: object

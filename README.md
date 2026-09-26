@@ -62,6 +62,12 @@ number. `Money.usd("125.50")` validates an amount, and `decimalValue` gives an e
 `Foundation.Decimal` for arithmetic. Version 0.2.0 introduced this format; 0.1.0 used JSON
 numbers and doesn't work against the current API.
 
+An entry can be entered in another currency than the tenant's functional currency (the one
+its books are kept in) by passing `exchangeRate` with the payload: functional-currency units
+per one unit of the entry's currency, as an exact string such as `"1.0845"`. The entry is
+booked at that rate; entry summaries return the booked `totalAmount` alongside the
+`transactionAmount` as entered and the `exchangeRate`.
+
 ## Using `lw`
 
 ```sh
@@ -72,6 +78,8 @@ export LEDGERWRITER_TOKEN=...            # API token from LedgerWriter settings
 .build/release/lw open-account --name "Operating Cash" --type asset --cash --bank-type checking
 .build/release/lw post-entry --date 2026-09-25 --memo "Invoice 1042" \
   --debit CASH_ID=250 --credit REVENUE_ID=250 --idempotency-key invoice-1042
+.build/release/lw post-entry --date 2026-09-25 --memo "Invoice 1043 (EUR)" \
+  --currency EUR --rate 1.0845 --debit CASH_ID=200 --credit REVENUE_ID=200
 ```
 
 Set `LEDGERWRITER_BASE_URL` to target a non-production API. Errors print the stable code and

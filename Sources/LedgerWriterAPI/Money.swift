@@ -5,11 +5,13 @@ import Foundation
 // helpers keep it exact on the Swift side too: construction validates the string, and
 // arithmetic goes through Foundation.Decimal (base 10), never Double.
 extension Components.Schemas.Money {
-    private static let amountPattern = #"^-?(0|[1-9][0-9]*)(\.[0-9]{1,2})?$"#
+    private static let amountPattern = #"^-?(0|[1-9][0-9]*)(\.[0-9]{1,3})?$"#
     private static let currencyPattern = #"^[A-Z]{3}$"#
 
     /// A Money value from an exact decimal string ("125.50", "125.5", "125"), or nil if the
-    /// amount has more than two decimal places or isn't a plain decimal number.
+    /// amount has more than three decimal places or isn't a plain decimal number. The server
+    /// also enforces the currency's own exponent: two places for USD or EUR, none for JPY,
+    /// three for BHD.
     public static func make(_ amount: String, currency: String) -> Self? {
         guard amount.range(of: amountPattern, options: .regularExpression) != nil,
             currency.range(of: currencyPattern, options: .regularExpression) != nil
@@ -17,9 +19,10 @@ extension Components.Schemas.Money {
         return .init(amount: amount, currency: currency)
     }
 
-    /// A USD amount; see ``make(_:currency:)``.
+    /// A USD amount with at most two decimal places; see ``make(_:currency:)``.
     public static func usd(_ amount: String) -> Self? {
-        make(amount, currency: "USD")
+        guard amount.split(separator: ".").dropFirst().first.map({ $0.count <= 2 }) ?? true else { return nil }
+        return make(amount, currency: "USD")
     }
 
     /// The exact value. Decimal is base 10, so "0.10" is exactly one tenth.

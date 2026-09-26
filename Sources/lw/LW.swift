@@ -66,7 +66,11 @@ struct Entries: AsyncParsableCommand {
         printTable(
             ["ENTRY ID", "DATE", "MEMO", "AMOUNT", "REVERSED"],
             entries.map {
-                [$0.entryId, $0.date, $0.memo, formatAmount($0.totalAmount), $0.reversedAt == nil ? "" : "yes"]
+                [
+                    $0.entryId, $0.date, $0.memo,
+                    formatAmount($0.totalAmount, original: $0.transactionAmount, rate: $0.exchangeRate),
+                    $0.reversedAt == nil ? "" : "yes",
+                ]
             }
         )
     }
@@ -124,7 +128,9 @@ struct PostEntry: AsyncParsableCommand {
         abstract: "Post a journal entry.",
         discussion: """
             Each --debit/--credit is ACCOUNT_ID=AMOUNT. Debits and credits must balance. \
-            Entries at or above the tenant's dual-approval threshold are created pending.
+            Entries at or above the tenant's dual-approval threshold are created pending. \
+            For an entry in a currency other than the tenant's functional currency, pass \
+            --currency and --rate (functional-currency units per one unit of --currency).
             """
     )
     @OptionGroup var connection: Connection
@@ -133,25 +139,25 @@ struct PostEntry: AsyncParsableCommand {
     @Option(help: "Memo.") var memo: String
     @Option(help: "ACCOUNT_ID=AMOUNT to debit (repeatable).") var debit: [String] = []
     @Option(help: "ACCOUNT_ID=AMOUNT to credit (repeatable).") var credit: [String] = []
+    @Option(help: "ISO 4217 currency of the amounts.") var currency = "USD"
+    @Option(help: "Exchange rate to the functional currency, e.g. 1.0845; required for a foreign currency.")
+    var rate: String?
     @Option(help: "Idempotency key, so a retry can't post the entry twice.") var idempotencyKey: String?
 
     func run() async throws {
         let lines = try debit.map { try line($0, debit: true) } + credit.map { try line($0, debit: false) }
-        try await issue(
-            connection,
-            type: "PostJournalEntry",
-            payload: ["date": date, "memo": memo, "lines": lines],
-            idempotencyKey: idempotencyKey
-        )
+        var payload: [String: Any] = ["date": date, "memo": memo, "lines": lines]
+        if let rate { payload["exchangeRate"] = rate }
+        try await issue(connection, type: "PostJournalEntry", payload: payload, idempotencyKey: idempotencyKey)
     }
 
     // Amounts stay strings end to end (never Double), matching the API's exact Money format.
     private func line(_ spec: String, debit: Bool) throws -> [String: Any] {
         let parts = spec.split(separator: "=", maxSplits: 1).map(String.init)
-        guard parts.count == 2, let amount = Components.Schemas.Money.usd(parts[1]), amount.isPositive
+        guard parts.count == 2, let amount = Components.Schemas.Money.make(parts[1], currency: currency),
+            amount.isPositive
         else {
-            throw ValidationError(
-                "Expected ACCOUNT_ID=AMOUNT with a positive amount and at most two decimals, got \(spec)")
+            throw ValidationError("Expected ACCOUNT_ID=AMOUNT with a positive \(currency) amount, got \(spec)")
         }
         let zero = ["amount": "0", "currency": amount.currency]
         let value = ["amount": amount.amount, "currency": amount.currency]
@@ -205,6 +211,16 @@ private func printTable(_ header: [String], _ rows: [[String]]) {
 
 private func formatAmount(_ money: Components.Schemas.Money) -> String {
     money.amount
+}
+
+// A booked amount, followed for a foreign-currency entry by the amount as entered and its rate.
+private func formatAmount(
+    _ booked: Components.Schemas.Money,
+    original: Components.Schemas.Money,
+    rate: String
+) -> String {
+    guard original.currency != booked.currency else { return booked.amount }
+    return "\(booked.amount) (\(original.currency) \(original.amount) at \(rate))"
 }
 
 private func printError(_ message: String) {

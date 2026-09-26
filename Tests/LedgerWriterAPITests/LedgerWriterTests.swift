@@ -73,13 +73,22 @@ final class LedgerWriterTests: XCTestCase {
                 """
                 [{"tenantId":"t1","entryId":"e1","date":"2026-09-01","memo":"Sale",
                   "totalAmount":{"amount":"125.50","currency":"USD"},
-                  "createdAt":"2026-09-01T10:00:00.000Z","reversedAt":null}]
+                  "transactionAmount":{"amount":"125.50","currency":"USD"},"exchangeRate":"1",
+                  "createdAt":"2026-09-01T10:00:00.000Z","reversedAt":null},
+                 {"tenantId":"t1","entryId":"e2","date":"2026-09-02","memo":"Sale in euros",
+                  "totalAmount":{"amount":"216.90","currency":"USD"},
+                  "transactionAmount":{"amount":"200.00","currency":"EUR"},"exchangeRate":"1.0845",
+                  "createdAt":"2026-09-02T10:00:00.000Z","reversedAt":null}]
                 """
             )
         ).journalEntries()
         XCTAssertEqual(entries.first?.totalAmount.amount, "125.50")
         XCTAssertEqual(entries.first?.totalAmount.currency, "USD")
         XCTAssertNil(entries.first?.reversedAt)
+        // A foreign-currency entry: booked in USD, with the amount as entered and its rate.
+        XCTAssertEqual(entries.last?.totalAmount.amount, "216.90")
+        XCTAssertEqual(entries.last?.transactionAmount.currency, "EUR")
+        XCTAssertEqual(entries.last?.exchangeRate, "1.0845")
 
         let report = try await LedgerWriter(
             token: "t",
@@ -134,9 +143,33 @@ final class LedgerWriterTests: XCTestCase {
         guard case .created = output else { return XCTFail("expected 201 Created, got \(output)") }
     }
 
+    func testPostForeignCurrencyEntrySendsExchangeRate() async throws {
+        let transport = MockTransport.json(.created, #"{"entryId":"e10","status":"posted"}"#)
+        let command = try Components.Schemas.CommandRequest.make(
+            type: "PostJournalEntry",
+            payload: [
+                "date": "2026-09-25",
+                "memo": "Invoice in euros",
+                "lines": [
+                    ["accountId": "cash", "debit": ["amount": "200.00", "currency": "EUR"],
+                     "credit": ["amount": "0", "currency": "EUR"]],
+                    ["accountId": "revenue", "debit": ["amount": "0", "currency": "EUR"],
+                     "credit": ["amount": "200.00", "currency": "EUR"]],
+                ],
+                "exchangeRate": "1.0845",
+            ]
+        )
+        let encoded = String(decoding: try JSONEncoder().encode(command), as: UTF8.self)
+        XCTAssertTrue(encoded.contains(#""exchangeRate":"1.0845""#), encoded)
+        let output = try await LedgerWriter(token: "t", transport: transport).issue(command)
+        guard case .created = output else { return XCTFail("expected 201 Created, got \(output)") }
+    }
+
     func testMoneyHelpersAreExact() throws {
         XCTAssertEqual(Components.Schemas.Money.usd("125.5")?.amount, "125.5")
         XCTAssertNil(Components.Schemas.Money.usd("10.005"))
+        XCTAssertEqual(Components.Schemas.Money.make("1.500", currency: "BHD")?.amount, "1.500")
+        XCTAssertNil(Components.Schemas.Money.make("1.5001", currency: "BHD"))
         XCTAssertNil(Components.Schemas.Money.usd("1,000.00"))
         XCTAssertNil(Components.Schemas.Money.make("1.00", currency: "usd"))
 
