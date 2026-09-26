@@ -33,6 +33,26 @@ public struct LedgerAccount: Sendable, Hashable, Codable, Identifiable {
     public let updatedAt: Date
 
     public var id: String { accountId }
+
+    public init(
+        tenantId: String,
+        accountId: String,
+        name: String,
+        accountType: AccountType,
+        isCashAccount: Bool,
+        bankAccountType: BankAccountType?,
+        status: Status,
+        updatedAt: Date
+    ) {
+        self.tenantId = tenantId
+        self.accountId = accountId
+        self.name = name
+        self.accountType = accountType
+        self.isCashAccount = isCashAccount
+        self.bankAccountType = bankAccountType
+        self.status = status
+        self.updatedAt = updatedAt
+    }
 }
 
 public struct AccountBalance: Sendable, Hashable, Codable {
@@ -41,6 +61,18 @@ public struct AccountBalance: Sendable, Hashable, Codable {
     /// Signed net balance, debits minus credits, in the tenant's functional currency.
     public let balance: Money
     public let updatedAt: Date
+
+    public init(
+        tenantId: String,
+        accountId: String,
+        balance: Money,
+        updatedAt: Date
+    ) {
+        self.tenantId = tenantId
+        self.accountId = accountId
+        self.balance = balance
+        self.updatedAt = updatedAt
+    }
 }
 
 /// A posted journal entry. Pending entries (awaiting dual approval) aren't listed.
@@ -63,6 +95,28 @@ public struct JournalEntry: Sendable, Hashable, Codable, Identifiable {
     public var id: String { entryId }
     public var isForeignCurrency: Bool { transactionAmount.currency != totalAmount.currency }
     public var isReversed: Bool { reversedAt != nil }
+
+    public init(
+        tenantId: String,
+        entryId: String,
+        date: String,
+        memo: String,
+        totalAmount: Money,
+        transactionAmount: Money,
+        exchangeRate: String,
+        createdAt: Date,
+        reversedAt: Date?
+    ) {
+        self.tenantId = tenantId
+        self.entryId = entryId
+        self.date = date
+        self.memo = memo
+        self.totalAmount = totalAmount
+        self.transactionAmount = transactionAmount
+        self.exchangeRate = exchangeRate
+        self.createdAt = createdAt
+        self.reversedAt = reversedAt
+    }
 }
 
 public struct TrialBalanceRow: Sendable, Hashable, Codable {
@@ -71,6 +125,20 @@ public struct TrialBalanceRow: Sendable, Hashable, Codable {
     public let accountType: AccountType
     public let debit: Money
     public let credit: Money
+
+    public init(
+        accountId: String,
+        name: String,
+        accountType: AccountType,
+        debit: Money,
+        credit: Money
+    ) {
+        self.accountId = accountId
+        self.name = name
+        self.accountType = accountType
+        self.debit = debit
+        self.credit = credit
+    }
 }
 
 public struct TrialBalance: Sendable, Hashable, Codable {
@@ -79,6 +147,18 @@ public struct TrialBalance: Sendable, Hashable, Codable {
     public let totalCredit: Money
     /// Always true for an uncorrupted ledger: every posted entry balances.
     public let balanced: Bool
+
+    public init(
+        rows: [TrialBalanceRow],
+        totalDebit: Money,
+        totalCredit: Money,
+        balanced: Bool
+    ) {
+        self.rows = rows
+        self.totalDebit = totalDebit
+        self.totalCredit = totalCredit
+        self.balanced = balanced
+    }
 }
 
 /// One line of a journal entry to post: exactly one side carries a positive amount.
@@ -94,6 +174,16 @@ public struct JournalEntryLine: Sendable, Hashable, Codable {
     public static func credit(_ accountId: String, _ amount: Money) -> JournalEntryLine {
         JournalEntryLine(accountId: accountId, debit: .zero(amount.currency), credit: amount)
     }
+
+    public init(
+        accountId: String,
+        debit: Money,
+        credit: Money
+    ) {
+        self.accountId = accountId
+        self.debit = debit
+        self.credit = credit
+    }
 }
 
 /// The result of posting an entry: `.pending` when its booked total reached the tenant's
@@ -105,4 +195,12 @@ public struct PostedEntry: Sendable, Hashable, Codable {
 
     public let entryId: String
     public let status: Status
+
+    public init(
+        entryId: String,
+        status: Status
+    ) {
+        self.entryId = entryId
+        self.status = status
+    }
 }
