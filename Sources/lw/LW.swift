@@ -130,7 +130,8 @@ struct PostEntry: AsyncParsableCommand {
             Each --debit/--credit is ACCOUNT_ID=AMOUNT. Debits and credits must balance. \
             Entries at or above the tenant's dual-approval threshold are created pending. \
             For an entry in a currency other than the tenant's functional currency, pass \
-            --currency and --rate (functional-currency units per one unit of --currency).
+            --currency, and --rate (functional-currency units per one unit of --currency) \
+            unless the rate on file for the entry date should be used.
             """
     )
     @OptionGroup var connection: Connection
@@ -140,7 +141,7 @@ struct PostEntry: AsyncParsableCommand {
     @Option(help: "ACCOUNT_ID=AMOUNT to debit (repeatable).") var debit: [String] = []
     @Option(help: "ACCOUNT_ID=AMOUNT to credit (repeatable).") var credit: [String] = []
     @Option(help: "ISO 4217 currency of the amounts.") var currency = "USD"
-    @Option(help: "Exchange rate to the functional currency, e.g. 1.0845; required for a foreign currency.")
+    @Option(help: "Exchange rate to the functional currency, e.g. 1.0845; omit to use the rate on file.")
     var rate: String?
     @Option(help: "Idempotency key, so a retry can't post the entry twice.") var idempotencyKey: String?
 

@@ -64,8 +64,9 @@ numbers and doesn't work against the current API.
 
 An entry can be entered in another currency than the tenant's functional currency (the one
 its books are kept in) by passing `exchangeRate` with the payload: functional-currency units
-per one unit of the entry's currency, as an exact string such as `"1.0845"`. The entry is
-booked at that rate; entry summaries return the booked `totalAmount` alongside the
+per one unit of the entry's currency, as an exact string such as `"1.0845"`. Leave it out
+to book at the rate on file for the entry date (a rate the tenant entered, else the ECB
+reference rate). Entry summaries return the booked `totalAmount` alongside the
 `transactionAmount` as entered and the `exchangeRate`.
 
 ## Using `lw`
@@ -80,6 +81,8 @@ export LEDGERWRITER_TOKEN=...            # API token from LedgerWriter settings
   --debit CASH_ID=250 --credit REVENUE_ID=250 --idempotency-key invoice-1042
 .build/release/lw post-entry --date 2026-09-25 --memo "Invoice 1043 (EUR)" \
   --currency EUR --rate 1.0845 --debit CASH_ID=200 --credit REVENUE_ID=200
+.build/release/lw post-entry --date 2026-09-25 --memo "Invoice 1044 (EUR, rate on file)" \
+  --currency EUR --debit CASH_ID=80 --credit REVENUE_ID=80
 ```
 
 Set `LEDGERWRITER_BASE_URL` to target a non-production API. Errors print the stable code and

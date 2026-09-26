@@ -613,10 +613,13 @@ components:
             $ref: '#/components/schemas/JournalEntryLine'
         exchangeRate:
           description: |
-            Required when the lines are in a currency other than the tenant's functional
-            currency; the entry is booked at this rate, rounded once per line to the
-            functional currency's minor unit. Omit it (or send `"1"`) for a functional-currency
-            entry.
+            For lines in a currency other than the tenant's functional currency: the entry is
+            booked at this rate, rounded once per line to the functional currency's minor
+            unit. When omitted, the rate on file for the entry date is used: a rate the
+            tenant entered, else the European Central Bank reference rate, from the most
+            recent date within the previous seven days. With no rate on file the command
+            fails with `INVALID_EXCHANGE_RATE`. Omit it (or send `"1"`) for a
+            functional-currency entry.
           $ref: '#/components/schemas/ExchangeRate'
 
     ReverseJournalEntryCommand:
