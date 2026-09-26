@@ -2,16 +2,19 @@
 
 The Swift SDK and `lw` command-line tool for the LedgerWriter API.
 
-The client is **generated at build time** from
+The HTTP client is **generated at build time** from
 [`Sources/LedgerWriterAPI/openapi.yaml`](Sources/LedgerWriterAPI/openapi.yaml), the published
 OpenAPI 3.1 contract for the LedgerWriter external API. It is a byte-identical copy of the
 contract maintained in LedgerWriter's (private) service repository, where a contract test
 keeps the running API and the spec in agreement; this repository never edits it.
 `SPEC_SOURCE` records which commit the copy came from.
 
+The generated code is **internal** to the SDK. Apps use only `LedgerWriter` and the public
+models, which are hand-written and stable, so a regenerated client never changes an app's API.
+
 | Product | Platforms | What it is |
 | --- | --- | --- |
-| `LedgerWriterAPI` | iOS 17, macOS 14, Linux | Generated client plus `LedgerWriter`, a small convenience layer: bearer-token auth, typed errors, request ids |
+| `LedgerWriterAPI` | iOS 17, macOS 14, Linux | `LedgerWriter` plus hand-written models (`Money`, `LedgerAccount`, `JournalEntry`, ...): typed queries and commands, bearer-token auth, typed errors, request ids |
 | `lw` | macOS, Linux | Command-line tool built on `LedgerWriterAPI` |
 
 Planned next, per ADR-14: `LedgerWriterAuth` (OAuth + PKCE, passkeys), `LedgerWriterBankLink`
@@ -34,21 +37,14 @@ let ledgerWriter = LedgerWriter(token: apiToken)
 let accounts = try await ledgerWriter.ledgerAccounts()
 let report = try await ledgerWriter.trialBalance()
 
-let command = try Components.Schemas.CommandRequest.make(
-    type: "PostJournalEntry",
-    payload: [
-        "date": "2026-09-25",
-        "memo": "Invoice 1042",
-        "lines": [
-            ["accountId": cashId, "debit": ["amount": "250.00", "currency": "USD"],
-             "credit": ["amount": "0", "currency": "USD"]],
-            ["accountId": revenueId, "debit": ["amount": "0", "currency": "USD"],
-             "credit": ["amount": "250.00", "currency": "USD"]],
-        ],
-    ]
-)
 do {
-    let result = try await ledgerWriter.issue(command, idempotencyKey: "invoice-1042")
+    let posted = try await ledgerWriter.postJournalEntry(
+        date: "2026-09-25",
+        memo: "Invoice 1042",
+        lines: [.debit(cashId, Money.usd("250.00")!), .credit(revenueId, Money.usd("250.00")!)],
+        idempotencyKey: "invoice-1042"  // generate once per user action; retries are then safe
+    )
+    // posted.status is .pending when the entry reached the dual-approval threshold.
 } catch let error as LedgerWriterError {
     // error.code is stable (ADR-12), e.g. "UNBALANCED_ENTRY"; branch on it, not on message.
     // error.requestId matches the id stored on the events in the audit trail.
@@ -56,14 +52,14 @@ do {
 }
 ```
 
-Every amount is a `Money` value, an exact decimal string plus a currency code
-(`Components.Schemas.Money(amount: "125.50", currency: "USD")`), never a floating-point
-number. `Money.usd("125.50")` validates an amount, and `decimalValue` gives an exact
+Every amount is a `Money` value, an exact decimal string plus a currency code, never a
+floating-point number. `Money.make("125.50", currency: "EUR")` and `Money.usd("125.50")`
+validate an amount, and `decimalValue` gives an exact
 `Foundation.Decimal` for arithmetic. Version 0.2.0 introduced this format; 0.1.0 used JSON
 numbers and doesn't work against the current API.
 
 An entry can be entered in another currency than the tenant's functional currency (the one
-its books are kept in) by passing `exchangeRate` with the payload: functional-currency units
+its books are kept in) by passing `exchangeRate` to `postJournalEntry`: functional-currency units
 per one unit of the entry's currency, as an exact string such as `"1.0845"`. Leave it out
 to book at the rate on file for the entry date (a rate the tenant entered, else the ECB
 reference rate). Entry summaries return the booked `totalAmount` alongside the

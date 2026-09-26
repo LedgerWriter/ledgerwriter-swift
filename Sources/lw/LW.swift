@@ -12,7 +12,7 @@ struct LW: AsyncParsableCommand {
             to target a non-production API.
             """,
         subcommands: [
-            Accounts.self, Entries.self, Balances.self, TrialBalance.self,
+            Accounts.self, Entries.self, Balances.self, TrialBalanceReport.self,
             OpenAccount.self, PostEntry.self,
         ]
     )
@@ -87,7 +87,7 @@ struct Balances: AsyncParsableCommand {
     }
 }
 
-struct TrialBalance: AsyncParsableCommand {
+struct TrialBalanceReport: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "trial-balance", abstract: "Show the trial balance.")
     @OptionGroup var connection: Connection
 
@@ -116,9 +116,26 @@ struct OpenAccount: AsyncParsableCommand {
     @Option(help: "Idempotency key, so a retry can't open the account twice.") var idempotencyKey: String?
 
     func run() async throws {
-        var payload: [String: Any] = ["name": name, "accountType": type, "isCashAccount": cash]
-        if let bankType { payload["bankAccountType"] = bankType }
-        try await issue(connection, type: "OpenLedgerAccount", payload: payload, idempotencyKey: idempotencyKey)
+        guard let accountType = AccountType(rawValue: type) else {
+            throw ValidationError("--type must be one of \(AccountType.allCases.map(\.rawValue).joined(separator: ", "))")
+        }
+        let bankAccountType = try bankType.map { value in
+            guard let parsed = BankAccountType(rawValue: value) else {
+                throw ValidationError(
+                    "--bank-type must be one of \(BankAccountType.allCases.map(\.rawValue).joined(separator: ", "))")
+            }
+            return parsed
+        }
+        let accountId = try await reportingErrors {
+            try await connection.client().openLedgerAccount(
+                name: name,
+                type: accountType,
+                isCashAccount: cash,
+                bankAccountType: bankAccountType,
+                idempotencyKey: idempotencyKey
+            )
+        }
+        try printJSON(["accountId": accountId])
     }
 }
 
@@ -147,39 +164,26 @@ struct PostEntry: AsyncParsableCommand {
 
     func run() async throws {
         let lines = try debit.map { try line($0, debit: true) } + credit.map { try line($0, debit: false) }
-        var payload: [String: Any] = ["date": date, "memo": memo, "lines": lines]
-        if let rate { payload["exchangeRate"] = rate }
-        try await issue(connection, type: "PostJournalEntry", payload: payload, idempotencyKey: idempotencyKey)
+        let posted = try await reportingErrors {
+            try await connection.client().postJournalEntry(
+                date: date,
+                memo: memo,
+                lines: lines,
+                exchangeRate: rate,
+                idempotencyKey: idempotencyKey
+            )
+        }
+        try printJSON(posted)
     }
 
     // Amounts stay strings end to end (never Double), matching the API's exact Money format.
-    private func line(_ spec: String, debit: Bool) throws -> [String: Any] {
+    private func line(_ spec: String, debit: Bool) throws -> JournalEntryLine {
         let parts = spec.split(separator: "=", maxSplits: 1).map(String.init)
-        guard parts.count == 2, let amount = Components.Schemas.Money.make(parts[1], currency: currency),
-            amount.isPositive
+        guard parts.count == 2, let amount = Money.make(parts[1], currency: currency), amount.isPositive
         else {
             throw ValidationError("Expected ACCOUNT_ID=AMOUNT with a positive \(currency) amount, got \(spec)")
         }
-        let zero = ["amount": "0", "currency": amount.currency]
-        let value = ["amount": amount.amount, "currency": amount.currency]
-        return ["accountId": parts[0], "debit": debit ? value : zero, "credit": debit ? zero : value]
-    }
-}
-
-private func issue(
-    _ connection: Connection,
-    type: String,
-    payload: [String: Any],
-    idempotencyKey: String?
-) async throws {
-    let command = try Components.Schemas.CommandRequest.make(type: type, payload: payload)
-    let output = try await reportingErrors {
-        try await connection.client().issue(command, idempotencyKey: idempotencyKey)
-    }
-    switch output {
-    case .ok(let applied): try printJSON(applied.body.json)
-    case .created(let created): try printJSON(created.body.json)
-    default: throw ExitCode.failure  // Unreachable: error statuses throw LedgerWriterError.
+        return debit ? .debit(parts[0], amount) : .credit(parts[0], amount)
     }
 }
 
@@ -210,14 +214,14 @@ private func printTable(_ header: [String], _ rows: [[String]]) {
     }
 }
 
-private func formatAmount(_ money: Components.Schemas.Money) -> String {
+private func formatAmount(_ money: Money) -> String {
     money.amount
 }
 
 // A booked amount, followed for a foreign-currency entry by the amount as entered and its rate.
 private func formatAmount(
-    _ booked: Components.Schemas.Money,
-    original: Components.Schemas.Money,
+    _ booked: Money,
+    original: Money,
     rate: String
 ) -> String {
     guard original.currency != booked.currency else { return booked.amount }
