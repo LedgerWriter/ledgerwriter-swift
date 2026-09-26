@@ -23,6 +23,11 @@ against an older one.
 
 ### Added
 
+- `pendingJournalEntries()` lists entries awaiting dual approval, with the lines approving
+  them would book (`PendingJournalEntry`, `EntryLine`).
+- `effectiveExchangeRate(currency:date:)` returns the rate a foreign-currency entry would book
+  at if it didn't state one (`EffectiveExchangeRate`, `StoredExchangeRate`).
+- `JournalEntry.selfApproved`.
 - Multi-currency:
   - `JournalEntry.transactionAmount`, `exchangeRate` and `isForeignCurrency`;
   - `postJournalEntry(... exchangeRate:)`. Leave it nil to book at the rate on file for the

@@ -73,11 +73,11 @@ final class LedgerWriterTests: XCTestCase {
                 """
                 [{"tenantId":"t1","entryId":"e1","date":"2026-09-01","memo":"Sale",
                   "totalAmount":{"amount":"125.50","currency":"USD"},
-                  "transactionAmount":{"amount":"125.50","currency":"USD"},"exchangeRate":"1",
+                  "transactionAmount":{"amount":"125.50","currency":"USD"},"exchangeRate":"1","selfApproved":true,
                   "createdAt":"2026-09-01T10:00:00.000Z","reversedAt":null},
                  {"tenantId":"t1","entryId":"e2","date":"2026-09-02","memo":"Sale in euros",
                   "totalAmount":{"amount":"216.90","currency":"USD"},
-                  "transactionAmount":{"amount":"200.00","currency":"EUR"},"exchangeRate":"1.0845",
+                  "transactionAmount":{"amount":"200.00","currency":"EUR"},"exchangeRate":"1.0845","selfApproved":false,
                   "createdAt":"2026-09-02T10:00:00.000Z","reversedAt":null}]
                 """
             )
@@ -91,6 +91,7 @@ final class LedgerWriterTests: XCTestCase {
         XCTAssertEqual(entries.last?.exchangeRate, "1.0845")
         XCTAssertTrue(entries.last?.isForeignCurrency ?? false)
         XCTAssertFalse(entries.first?.isReversed ?? true)
+        XCTAssertEqual(entries.map(\.selfApproved), [true, false])
 
         let report = try await LedgerWriter(
             token: "t",
@@ -139,6 +140,45 @@ final class LedgerWriterTests: XCTestCase {
         ).accountBalances()
         XCTAssertEqual(balances.first?.balance, Money.usd("-1250.00"))
         XCTAssertTrue(balances.first?.balance.isNegative ?? false)
+    }
+
+    func testPendingEntriesAndEffectiveExchangeRate() async throws {
+        let pending = try await LedgerWriter(
+            token: "t",
+            transport: MockTransport.json(
+                .ok,
+                """
+                [{"tenantId":"t1","entryId":"p1","date":"2026-09-25","memo":"Big invoice",
+                  "totalAmount":{"amount":"10845.00","currency":"USD"},
+                  "transactionAmount":{"amount":"10000.00","currency":"EUR"},
+                  "exchangeRate":"1.0845","postedBy":"u1",
+                  "lines":[{"accountId":"ar","debit":{"amount":"10845.00","currency":"USD"},
+                            "credit":{"amount":"0.00","currency":"USD"},
+                            "transactionDebit":{"amount":"10000.00","currency":"EUR"},
+                            "transactionCredit":{"amount":"0.00","currency":"EUR"}}]}]
+                """
+            )
+        ).pendingJournalEntries()
+        XCTAssertEqual(pending.first?.postedBy, "u1")
+        XCTAssertTrue(pending.first?.isForeignCurrency ?? false)
+        XCTAssertEqual(pending.first?.lines.first?.transactionDebit, Money.make("10000.00", currency: "EUR"))
+
+        let transport = MockTransport.json(
+            .ok,
+            #"{"currency":"GBP","functionalCurrency":"USD","date":"2026-09-27","rate":{"rate":"1.27","source":"ecb","rateDate":"2026-09-25"}}"#
+        )
+        let effective = try await LedgerWriter(token: "t", transport: transport)
+            .effectiveExchangeRate(currency: "GBP", date: "2026-09-27")
+        XCTAssertEqual(effective.rate, StoredExchangeRate(rate: "1.27", source: .ecb, rateDate: "2026-09-25"))
+        let query = transport.requests.first?.path ?? ""
+        XCTAssertTrue(query.contains("currency=GBP") && query.contains("date=2026-09-27"), query)
+
+        let none = try await LedgerWriter(
+            token: "t",
+            transport: MockTransport.json(
+                .ok, #"{"currency":"BHD","functionalCurrency":"USD","date":"2026-09-27"}"#)
+        ).effectiveExchangeRate(currency: "BHD", date: "2026-09-27")
+        XCTAssertNil(none.rate)
     }
 
     func testOpenLedgerAccountForwardsIdempotencyKeyAndReturnsTheId() async throws {

@@ -36,6 +36,8 @@ let ledgerWriter = LedgerWriter(token: apiToken)
 
 let accounts = try await ledgerWriter.ledgerAccounts()
 let report = try await ledgerWriter.trialBalance()
+let awaitingApproval = try await ledgerWriter.pendingJournalEntries()
+let eurRate = try await ledgerWriter.effectiveExchangeRate(currency: "EUR", date: "2026-09-25")
 
 do {
     let posted = try await ledgerWriter.postJournalEntry(
