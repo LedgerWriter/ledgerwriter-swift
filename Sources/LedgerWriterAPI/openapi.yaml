@@ -268,6 +268,7 @@ components:
                       - INVALID_LINE_AMOUNTS
                       - UNSUPPORTED_CURRENCY
                       - INVALID_EXCHANGE_RATE
+                      - FX_GAIN_LOSS_ACCOUNT_REQUIRED
                       - UNBALANCED_ENTRY
                       - UNKNOWN_ACCOUNT
                       - INVALID_DATE
@@ -620,6 +621,12 @@ components:
             recent date within the previous seven days. With no rate on file the command
             fails with `INVALID_EXCHANGE_RATE`. Omit it (or send `"1"`) for a
             functional-currency entry.
+
+            When the entry reduces an asset or liability account's balance in this currency
+            (collecting a foreign receivable, paying a foreign payable), the reduced part is
+            booked at the functional amount it's carried at, and the difference is posted to
+            the tenant's FX gain/loss account as a realized gain or loss. Without a designated
+            account the command fails with `FX_GAIN_LOSS_ACCOUNT_REQUIRED`.
           $ref: '#/components/schemas/ExchangeRate'
 
     ReverseJournalEntryCommand:
