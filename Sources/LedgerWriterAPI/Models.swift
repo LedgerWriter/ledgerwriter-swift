@@ -75,17 +75,35 @@ public struct AccountBalance: Sendable, Hashable, Codable {
     }
 }
 
-/// What produced a journal entry. Everything posted through the API or the app is `standard`;
-/// the period close posts the others.
-public enum EntryKind: String, Sendable, Hashable, Codable {
-    case standard
-    /// The year-end entry that moves revenue and expense into retained earnings. The income
-    /// statement leaves it out.
-    case closing
-    /// Month-end unrealized FX gain/loss, dated the last day of the month.
-    case revaluation
-    /// The reversal of a revaluation, dated the first day of the next month.
-    case revaluationReversal = "revaluation-reversal"
+/// What produced a journal entry: `standard` for everything posted through the API or the app,
+/// or `closing` for the year-end entry that moves revenue and expense into retained earnings.
+/// String-backed rather than an enum, so an entry of a kind added later still decodes; treat
+/// an unknown kind like `standard`.
+public struct EntryKind: RawRepresentable, Sendable, Hashable, Codable, CustomStringConvertible {
+    public let rawValue: String
+
+    public init(rawValue: String) { self.rawValue = rawValue }
+
+    public init(from decoder: any Decoder) throws {
+        rawValue = try decoder.singleValueContainer().decode(String.self)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    public var description: String { rawValue }
+
+    public static let standard = EntryKind(rawValue: "standard")
+    /// The year-end closing entry. The income statement leaves it out.
+    public static let closing = EntryKind(rawValue: "closing")
+}
+
+/// A plain-text accounting journal format for ``LedgerWriter/exportJournal(format:)``.
+public enum JournalFormat: String, Sendable, CaseIterable {
+    /// hledger's journal format, which Ledger also reads for the most part.
+    case hledger
 }
 
 /// A posted journal entry. Pending entries (awaiting dual approval) aren't listed.

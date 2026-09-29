@@ -13,7 +13,7 @@ struct LW: AsyncParsableCommand {
             """,
         subcommands: [
             Accounts.self, Entries.self, Balances.self, TrialBalanceReport.self,
-            OpenAccount.self, PostEntry.self,
+            OpenAccount.self, PostEntry.self, Export.self,
         ]
     )
 }
@@ -73,6 +73,24 @@ struct Entries: AsyncParsableCommand {
                 ]
             }
         )
+    }
+}
+
+struct Export: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Print the books as a plain-text accounting journal.",
+        discussion: "For example: lw export > books.journal && hledger -f books.journal check"
+    )
+    @OptionGroup var connection: Connection
+    @Option(help: "Journal format: \(JournalFormat.allCases.map(\.rawValue).joined(separator: ", ")).")
+    var format: String = JournalFormat.hledger.rawValue
+
+    func run() async throws {
+        guard let journalFormat = JournalFormat(rawValue: format) else {
+            throw ValidationError("Unknown format \(format).")
+        }
+        let journal = try await reportingErrors { try await connection.client().exportJournal(format: journalFormat) }
+        print(journal, terminator: "")
     }
 }
 

@@ -222,6 +222,57 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /journal:
+    get:
+      operationId: exportJournal
+      summary: The ledger as a plain-text accounting journal
+      description: |
+        Every posted entry as an hledger journal, in date order, so the books can be checked
+        and read with plain-text accounting tools (`hledger -f books.journal check`).
+
+        - Foreign-currency lines carry their booked cost (`200.00 EUR @@ 216.90 USD`).
+        - The rates entries were booked at appear as `P` directives.
+        - A reversed entry is followed by its reversal.
+        - The file ends with balance assertions taken from the ledger's own balances.
+        - Pending entries are left out.
+      parameters:
+        - name: format
+          in: query
+          required: false
+          description: The journal format. Only `hledger` for now, the default.
+          schema:
+            type: string
+            enum: [hledger]
+      responses:
+        '200':
+          description: The journal.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          description: An unsupported `format` (`INVALID_INPUT`).
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Error'
+                  - properties:
+                      error:
+                        const: INVALID_INPUT
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/QueryForbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /account-balances:
     get:
       operationId: listAccountBalances
@@ -541,12 +592,12 @@ components:
           type: boolean
         entryKind:
           description: |
-            What produced the entry. `standard` for everything posted through this API or the
-            app; the period close posts `closing` (the year-end entry into retained earnings,
-            which the income statement leaves out), `revaluation` (month-end unrealized FX)
-            and `revaluation-reversal` (its reversal on the first day of the next month).
+            What produced the entry: `standard` for everything posted through this API or the
+            app, or `closing` for the year-end entry that moves revenue and expense into
+            retained earnings (the income statement leaves it out). A string rather than an
+            enum so clients keep working if another kind is added; treat an unknown value like
+            `standard`. Unrealized FX is never an entry: it's a report-time valuation.
           type: string
-          enum: [standard, closing, revaluation, revaluation-reversal]
         createdAt:
           type: string
           format: date-time

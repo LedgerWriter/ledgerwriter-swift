@@ -28,8 +28,11 @@ against an older one.
 - `effectiveExchangeRate(currency:date:)` returns the rate a foreign-currency entry would book
   at if it didn't state one (`EffectiveExchangeRate`, `StoredExchangeRate`).
 - `JournalEntry.selfApproved`.
-- `JournalEntry.entryKind` (`EntryKind`): `standard`, or `closing`, `revaluation` and
-  `revaluationReversal` for the entries the period close posts.
+- `JournalEntry.entryKind` (`EntryKind`): `.standard`, or `.closing` for the year-end entry
+  into retained earnings. It is string-backed, so a kind added later still decodes.
+- `exportJournal(format:)` returns the books as a plain-text accounting journal (hledger
+  format): costs as `@@`, rates as `P` directives, and closing balance assertions. Check it
+  with `hledger -f books.journal check`. `lw export > books.journal` does the same.
 - Multi-currency:
   - `JournalEntry.transactionAmount`, `exchangeRate` and `isForeignCurrency`;
   - `postJournalEntry(... exchangeRate:)`. Leave it nil to book at the rate on file for the

@@ -63,6 +63,20 @@ public struct LedgerWriter: Sendable {
             })
     }
 
+    /// The books as a plain-text accounting journal, for tools such as hledger
+    /// (`hledger -f books.journal check`). Every posted entry in date order:
+    /// - foreign-currency lines at their booked cost;
+    /// - the booking rates as `P` directives;
+    /// - a reversed entry followed by its reversal.
+    ///
+    /// It ends with balance assertions taken from the ledger's own balances.
+    public func exportJournal(format: JournalFormat = .hledger) async throws -> String {
+        let body = try await unwrapped {
+            try await client.exportJournal(query: .init(format: .init(rawValue: format.rawValue))).ok.body.plainText
+        }
+        return try await String(collecting: body, upTo: 64 * 1024 * 1024)
+    }
+
     public func accountBalances() async throws -> [AccountBalance] {
         try Self.convert(try await unwrapped { try await client.listAccountBalances().ok.body.json })
     }
@@ -76,9 +90,14 @@ public struct LedgerWriter: Sendable {
     // Pass an `idempotencyKey` to make a retry safe: replaying the same key returns the original
     // result instead of applying the command twice. Generate it once per user action.
 
-    /// Posts a journal entry. Every line must be in the same currency. For a currency other than
+    /// Posts a journal entry. Its lines are usually in one currency. For a currency other than
     /// the tenant's functional currency, pass `exchangeRate` (functional units per one unit, e.g.
     /// `"1.0845"`), or leave it nil to book at the rate on file for `date`.
+    ///
+    /// An entry may also mix lines in the functional currency with lines in one other currency
+    /// (paying a EUR bill from USD cash). It must balance at the rate, and the ledger balances
+    /// each currency through the tenant's FX trading account (`FX_TRADING_ACCOUNT_REQUIRED`
+    /// until one is set).
     public func postJournalEntry(
         date: String,
         memo: String,

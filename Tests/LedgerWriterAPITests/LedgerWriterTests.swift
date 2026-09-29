@@ -65,6 +65,24 @@ final class LedgerWriterTests: XCTestCase {
         XCTAssertEqual(ledgerWriter.lastRequestId, "req-1")
     }
 
+    func testExportsThePlainTextJournal() async throws {
+        let transport = MockTransport { _ in
+            (
+                HTTPResponse(
+                    status: .ok,
+                    headerFields: [.contentType: "text/plain; charset=UTF-8", .xRequestId: "req-9"]
+                ),
+                "; Acme Co\n\n2026-09-01 * Cash sale  ; entry:e1\n    Assets:Cash  125.50 USD\n    Income:Sales  -125.50 USD\n"
+            )
+        }
+        let ledgerWriter = LedgerWriter(token: "t", transport: transport)
+        let journal = try await ledgerWriter.exportJournal()
+        XCTAssertTrue(journal.hasPrefix("; Acme Co"))
+        XCTAssertTrue(journal.contains("Income:Sales  -125.50 USD"))
+        XCTAssertEqual(transport.requests.first?.path, "/journal?format=hledger")
+        XCTAssertEqual(ledgerWriter.lastRequestId, "req-9")
+    }
+
     func testDecodesJournalEntriesAndTrialBalance() async throws {
         let entries = try await LedgerWriter(
             token: "t",
@@ -77,7 +95,7 @@ final class LedgerWriterTests: XCTestCase {
                   "createdAt":"2026-09-01T10:00:00.000Z","reversedAt":null},
                  {"tenantId":"t1","entryId":"e2","date":"2026-09-02","memo":"Sale in euros",
                   "totalAmount":{"amount":"216.90","currency":"USD"},
-                  "transactionAmount":{"amount":"200.00","currency":"EUR"},"exchangeRate":"1.0845","selfApproved":false,"entryKind":"revaluation-reversal",
+                  "transactionAmount":{"amount":"200.00","currency":"EUR"},"exchangeRate":"1.0845","selfApproved":false,"entryKind":"accrual",
                   "createdAt":"2026-09-02T10:00:00.000Z","reversedAt":null}]
                 """
             )
@@ -92,7 +110,8 @@ final class LedgerWriterTests: XCTestCase {
         XCTAssertTrue(entries.last?.isForeignCurrency ?? false)
         XCTAssertFalse(entries.first?.isReversed ?? true)
         XCTAssertEqual(entries.map(\.selfApproved), [true, false])
-        XCTAssertEqual(entries.map(\.entryKind), [.standard, .revaluationReversal])
+        // An unknown kind (one added after this SDK) still decodes.
+        XCTAssertEqual(entries.map(\.entryKind), [.standard, EntryKind(rawValue: "accrual")])
 
         let report = try await LedgerWriter(
             token: "t",
