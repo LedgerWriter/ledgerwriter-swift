@@ -75,6 +75,19 @@ public struct AccountBalance: Sendable, Hashable, Codable {
     }
 }
 
+/// What produced a journal entry. Everything posted through the API or the app is `standard`;
+/// the period close posts the others.
+public enum EntryKind: String, Sendable, Hashable, Codable {
+    case standard
+    /// The year-end entry that moves revenue and expense into retained earnings. The income
+    /// statement leaves it out.
+    case closing
+    /// Month-end unrealized FX gain/loss, dated the last day of the month.
+    case revaluation
+    /// The reversal of a revaluation, dated the first day of the next month.
+    case revaluationReversal = "revaluation-reversal"
+}
+
 /// A posted journal entry. Pending entries (awaiting dual approval) aren't listed.
 public struct JournalEntry: Sendable, Hashable, Codable, Identifiable {
     public let tenantId: String
@@ -92,6 +105,7 @@ public struct JournalEntry: Sendable, Hashable, Codable, Identifiable {
     /// Approved by the person who posted it, which is allowed only when the tenant has a single
     /// active member.
     public let selfApproved: Bool
+    public let entryKind: EntryKind
     public let createdAt: Date
     public let reversedAt: Date?
 
@@ -108,6 +122,7 @@ public struct JournalEntry: Sendable, Hashable, Codable, Identifiable {
         transactionAmount: Money,
         exchangeRate: String,
         selfApproved: Bool,
+        entryKind: EntryKind = .standard,
         createdAt: Date,
         reversedAt: Date?
     ) {
@@ -119,6 +134,7 @@ public struct JournalEntry: Sendable, Hashable, Codable, Identifiable {
         self.transactionAmount = transactionAmount
         self.exchangeRate = exchangeRate
         self.selfApproved = selfApproved
+        self.entryKind = entryKind
         self.createdAt = createdAt
         self.reversedAt = reversedAt
     }

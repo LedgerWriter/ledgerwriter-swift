@@ -73,11 +73,11 @@ final class LedgerWriterTests: XCTestCase {
                 """
                 [{"tenantId":"t1","entryId":"e1","date":"2026-09-01","memo":"Sale",
                   "totalAmount":{"amount":"125.50","currency":"USD"},
-                  "transactionAmount":{"amount":"125.50","currency":"USD"},"exchangeRate":"1","selfApproved":true,
+                  "transactionAmount":{"amount":"125.50","currency":"USD"},"exchangeRate":"1","selfApproved":true,"entryKind":"standard",
                   "createdAt":"2026-09-01T10:00:00.000Z","reversedAt":null},
                  {"tenantId":"t1","entryId":"e2","date":"2026-09-02","memo":"Sale in euros",
                   "totalAmount":{"amount":"216.90","currency":"USD"},
-                  "transactionAmount":{"amount":"200.00","currency":"EUR"},"exchangeRate":"1.0845","selfApproved":false,
+                  "transactionAmount":{"amount":"200.00","currency":"EUR"},"exchangeRate":"1.0845","selfApproved":false,"entryKind":"revaluation-reversal",
                   "createdAt":"2026-09-02T10:00:00.000Z","reversedAt":null}]
                 """
             )
@@ -92,6 +92,7 @@ final class LedgerWriterTests: XCTestCase {
         XCTAssertTrue(entries.last?.isForeignCurrency ?? false)
         XCTAssertFalse(entries.first?.isReversed ?? true)
         XCTAssertEqual(entries.map(\.selfApproved), [true, false])
+        XCTAssertEqual(entries.map(\.entryKind), [.standard, .revaluationReversal])
 
         let report = try await LedgerWriter(
             token: "t",

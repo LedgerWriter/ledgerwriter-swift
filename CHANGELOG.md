@@ -28,12 +28,20 @@ against an older one.
 - `effectiveExchangeRate(currency:date:)` returns the rate a foreign-currency entry would book
   at if it didn't state one (`EffectiveExchangeRate`, `StoredExchangeRate`).
 - `JournalEntry.selfApproved`.
+- `JournalEntry.entryKind` (`EntryKind`): `standard`, or `closing`, `revaluation` and
+  `revaluationReversal` for the entries the period close posts.
 - Multi-currency:
   - `JournalEntry.transactionAmount`, `exchangeRate` and `isForeignCurrency`;
   - `postJournalEntry(... exchangeRate:)`. Leave it nil to book at the rate on file for the
     entry date.
-- New error codes to branch on: `UNSUPPORTED_CURRENCY`, `INVALID_EXCHANGE_RATE` and
-  `FX_GAIN_LOSS_ACCOUNT_REQUIRED`.
+- Mixed-currency entries: `postJournalEntry` accepts lines in the tenant's functional
+  currency alongside lines in one other currency (each `JournalEntryLine` already carries its
+  own `Money`). The ledger balances them through the tenant's FX trading account.
+- New error codes to branch on:
+  - `UNSUPPORTED_CURRENCY`, `INVALID_EXCHANGE_RATE` and `FX_GAIN_LOSS_ACCOUNT_REQUIRED`;
+  - `FX_TRADING_ACCOUNT_REQUIRED`, for a mixed-currency entry when no trading account is set;
+  - `PERIOD_LOCKED` (409): the entry is dated in a closed period, so posting, approving and
+    reversing it are refused.
 - `lw post-entry --currency --rate`. `lw entries` shows the original amount of foreign
   entries.
 
